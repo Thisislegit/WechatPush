@@ -2,10 +2,11 @@ import random
 from time import time, localtime
 import cityinfo
 from requests import get, post
-from datetime import datetime, date
+# from datetime import datetime, date
 from zhdate import ZhDate
 import sys
 import os
+import datetime
 
 
 def get_color():
@@ -49,21 +50,23 @@ def get_weather(province, city):
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
                       'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36'
     }
+    today = datetime.date.today()
     # url = "http://d1.weather.com.cn/dingzhi/{}.html?_={}".format(city_id, t)
-    url = "https://yiketianqi.com/api?version=v5&appid=57629537&appsecret=4ntEPluT&city=墨尔本"
-    response = get(url, headers=headers)
-    response.encoding = "utf-8"
-    response_data = response.text.split(";")[0].split("=")[-1]
-    response_json = eval(response_data)
-    print(response_json)
-    weatherinfo = response_json['data'][0]
+    url = "https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline/Melbourne?unitGroup=metric&include=days%2Ccurrent&key=3NLEZQDE4XMDLWBD5E2UYUU7P&contentType=json"
+    response = get(url, headers=headers).json()
+    response_data = response['days'][0]
+    assert response_data['datetime'] == str(today)
+    # humidity
+    humidity = response_data['humidity']
     # 天气
-    weather = weatherinfo["wea"]
+    weather = response_data["conditions"] + ". " + response_data['description']
     # 最高气温
-    temp = weatherinfo["tem1"]
+    temp = response_data["tempmax"]
     # 最低气温
-    tempn = weatherinfo["tem2"]
-    return weather, temp, tempn
+    tempn = response_data["tempmin"]
+    # feelslike
+    feelslike = response_data['feelslike']
+    return weather, temp, tempn, humidity, feelslike
 
 
 def get_birthday(birthday, year, today):
@@ -75,22 +78,20 @@ def get_birthday(birthday, year, today):
         # 今年生日
         birthday = ZhDate(year, r_mouth, r_day).to_datetime().date()
         year_date = birthday
-
-
     else:
         # 获取国历生日的今年对应月和日
         birthday_month = int(birthday.split("-")[1])
         birthday_day = int(birthday.split("-")[2])
         # 今年生日
-        year_date = date(year, birthday_month, birthday_day)
+        year_date = datetime.date(year, birthday_month, birthday_day)
     # 计算生日年份，如果还没过，按当年减，如果过了需要+1
     if today > year_date:
         if birthday_year[0] == "r":
             # 获取农历明年生日的月和日
             r_last_birthday = ZhDate((year + 1), r_mouth, r_day).to_datetime().date()
-            birth_date = date((year + 1), r_last_birthday.month, r_last_birthday.day)
+            birth_date = datetime.date((year + 1), r_last_birthday.month, r_last_birthday.day)
         else:
-            birth_date = date((year + 1), birthday_month, birthday_day)
+            birth_date = datetime.date((year + 1), birthday_month, birthday_day)
         birth_day = str(birth_date.__sub__(today)).split(" ")[0]
     elif today == year_date:
         birth_day = 0
@@ -113,19 +114,19 @@ def get_ciba():
     return note_ch, note_en
 
 
-def send_message(to_user, access_token, city_name, weather, max_temperature, min_temperature, note_ch, note_en):
+def send_message(to_user, access_token, city_name, weather, max_temperature, min_temperature, humidity, feelslike, note_ch, note_en):
     url = "https://api.weixin.qq.com/cgi-bin/message/template/send?access_token={}".format(access_token)
     week_list = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"]
     year = localtime().tm_year
     month = localtime().tm_mon
     day = localtime().tm_mday
-    today = datetime.date(datetime(year=year, month=month, day=day))
+    today = datetime.datetime.date(datetime.datetime(year=year, month=month, day=day))
     week = week_list[today.isoweekday() % 7]
     # 获取在一起的日子的日期格式
     love_year = int(config["love_date"].split("-")[0])
     love_month = int(config["love_date"].split("-")[1])
     love_day = int(config["love_date"].split("-")[2])
-    love_date = date(love_year, love_month, love_day)
+    love_date = datetime.date(love_year, love_month, love_day)
     # 获取在一起的日期差
     love_days = str(today.__sub__(love_date)).split(" ")[0]
     # 获取所有生日数据
@@ -151,12 +152,20 @@ def send_message(to_user, access_token, city_name, weather, max_temperature, min
                 "value": weather,
                 "color": get_color()
             },
+            "humidity":{
+                "value": round(humidity, 1),
+                "color": get_color()
+            },
+            "feelslike": {
+                "value": round(feelslike, 1),
+                "color": get_color()
+            },
             "min_temperature": {
-                "value": min_temperature,
+                "value": round(min_temperature, 1),
                 "color": get_color()
             },
             "max_temperature": {
-                "value": max_temperature,
+                "value": round(max_temperature, 1),
                 "color": get_color()
             },
             "love_day": {
@@ -220,10 +229,10 @@ if __name__ == "__main__":
     # 传入省份和市获取天气信息
     # province, city = config["province"], config["city"]
     country, city = "澳大利亚", "墨尔本"
-    weather, max_temperature, min_temperature = get_weather(country, city)
+    weather, max_temperature, min_temperature, humidity, feelslike = get_weather(country, city)
     # 获取词霸每日金句
     note_ch, note_en = get_ciba()
     # 公众号推送消息
     for user in users:
-        send_message(user, accessToken, city, weather, max_temperature, min_temperature, note_ch, note_en)
+        send_message(user, accessToken, city, weather, max_temperature, min_temperature, humidity, feelslike,note_ch, note_en)
     os.system("pause")
